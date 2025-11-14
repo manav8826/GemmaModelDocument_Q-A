@@ -1,62 +1,54 @@
 import os
 import streamlit as st
-from langchain_google_genai import ChatGoogleGenerativeAI  # Changed
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.chains.combine_documents.stuff import create_stuff_documents_chain
-from langchain_core.prompts import ChatPromptTemplate
-from langchain.chains import create_retrieval_chain
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings  # Changed
-from langchain_community.document_loaders import PyPDFLoader
 from dotenv import load_dotenv
 import asyncio
 import time
 
-# Load environment variables
+# LangChain v1 imports (updated)
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
+
+# Load env
 load_dotenv()
-# groq_api_key = os.getenv("GROQ_API_KEY")
 google_api_key = os.getenv("GOOGLE_API_KEY")
 
-# App title
+# UI
 st.title("GEMINI Model Document Q&A")
 
 st.markdown("""
 Welcome to **GEMINI-powered Document Q&A App**!  
-📄 Upload any PDF documents, and 🤖 ask questions about their content.  
-This app uses **Gemini 2-9B Instruct Model via Groq API** to give you fast and accurate answers.
-
-**How it works:**
-1. Upload one or more PDF files.
-2. Click on **"Documents Embedding"** to process the content.
-3. Ask any question related to the uploaded documents.
-4. Get instant answers with the most relevant document excerpts!
-
-> Built with ❤️ using Streamlit, LangChain, Groq, and Google Embeddings.
+📄 Upload any PDF and ask questions.  
+⚡ Powered by **Gemini 2.5 Pro** + **FAISS** + **LangChain v1**.
 """)
-    
 
+# Upload PDFs
+uploaded_files = st.file_uploader("Upload PDF files", type=["pdf"], accept_multiple_files=True)
 
-# Upload PDF files
-uploaded_files = st.file_uploader("Upload your PDF files", type=["pdf"], accept_multiple_files=True)
-
-# Initialize GEMINI LLM
+# LLM
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-pro",
     google_api_key=google_api_key,
     temperature=0.2
 )
 
-# Prompt Template
-prompt = ChatPromptTemplate.from_template(
-    """
-    Answer the question based on the context provided only.
-    <context>
-    {context}
-    Question: {input}
-    """
-)
+# Prompt
+prompt = ChatPromptTemplate.from_template("""
+Answer the question using ONLY the given context.
 
-# Document Embedding Function
+<context>
+{context}
+
+Question: {question}
+""")
+
+parser = StrOutputParser()
+
+# ---- VECTOR EMBEDDING FUNCTION ----
 def vector_embedding():
     try:
         asyncio.get_running_loop()
@@ -64,50 +56,63 @@ def vector_embedding():
         asyncio.set_event_loop(asyncio.new_event_loop())
 
     if uploaded_files and "vectors" not in st.session_state:
-        # Use HuggingFace embeddings instead
+
         st.session_state.embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
         st.session_state.docs = []
 
+        # Load all PDFs
         for uploaded_file in uploaded_files:
             with open(uploaded_file.name, "wb") as f:
                 f.write(uploaded_file.getbuffer())
+
             loader = PyPDFLoader(uploaded_file.name)
             st.session_state.docs.extend(loader.load())
-            os.remove(uploaded_file.name)  # Optional cleanup
+            os.remove(uploaded_file.name)
 
-        st.session_state.text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
-        st.session_state.final_documents = st.session_state.text_splitter.split_documents(st.session_state.docs)
-        st.session_state.vectors = FAISS.from_documents(st.session_state.final_documents, st.session_state.embeddings)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
+        final_docs = splitter.split_documents(st.session_state.docs)
 
-# User Input
-prompt1 = st.text_input("💬 What do you want to ask from the uploaded documents?")
+        st.session_state.final_documents = final_docs
+        st.session_state.vectors = FAISS.from_documents(final_docs, st.session_state.embeddings)
 
-# Button to trigger vector creation
+# Input box
+query = st.text_input("💬 Ask your question:")
+
+# Create vectors
 if st.button("🔍 Documents Embedding"):
     if uploaded_files:
         vector_embedding()
-        st.success("✅ Vector Store DB is ready!")
+        st.success("✅ Vector Store is ready!")
     else:
-        st.warning("⚠️ Please upload PDF files first.")
+        st.warning("⚠️ Upload PDFs first.")
 
-# Q&A Interaction
-if prompt1:
+# ---- RETRIEVAL + ANSWERING ----
+if query:
     if "vectors" not in st.session_state:
-        st.warning("⚠️ Please click 'Documents Embedding' first.")
+        st.warning("⚠️ Please run 'Documents Embedding' first.")
     else:
-        document_chain = create_stuff_documents_chain(llm, prompt)
         retriever = st.session_state.vectors.as_retriever()
-        retrieval_chain = create_retrieval_chain(retriever, document_chain)
+
+        # Retrieve relevant docs
+        retrieved_docs = retriever.get_relevant_documents(query)
+
+        # Build context text
+        context_text = "\n\n".join([doc.page_content for doc in retrieved_docs])
+
+        # Final chain: prompt → LLM → parser
+        chain = prompt | llm | parser
 
         start = time.process_time()
-        response = retrieval_chain.invoke({"input": prompt1})
-        st.subheader("🧠 Answer:")
-        st.write(response['answer'])
+        answer = chain.invoke({"context": context_text, "question": query})
 
-        with st.expander("📚 Document Context (Most Relevant Chunks)"):
-            for i, doc in enumerate(response["context"]):
-                st.markdown(f"**Chunk {i+1}:**")
+        st.subheader("🧠 Answer:")
+        st.write(answer)
+
+        # Show chunks
+        with st.expander("📚 Relevant Document Chunks"):
+            for i, doc in enumerate(retrieved_docs):
+                st.markdown(f"### Chunk {i+1}")
                 st.write(doc.page_content)
                 st.write("---")
