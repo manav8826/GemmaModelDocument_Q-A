@@ -1,6 +1,6 @@
 import os
 import streamlit as st
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI  # Changed
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.combine_documents.stuff import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
