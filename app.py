@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import asyncio
 import time
 
-# LangChain v1 imports (updated)
+# LangChain v1 imports
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.prompts import ChatPromptTemplate
@@ -13,17 +13,17 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 
-# Load env
+# Load environment variables
 load_dotenv()
 google_api_key = os.getenv("GOOGLE_API_KEY")
 
-# UI
+# App UI
 st.title("GEMINI Model Document Q&A")
 
 st.markdown("""
 Welcome to **GEMINI-powered Document Q&A App**!  
 📄 Upload any PDF and ask questions.  
-⚡ Powered by **Gemini 2.5 Pro** + **FAISS** + **LangChain v1**.
+⚡ Powered by **Gemini 2.5 Pro + FAISS + LangChain v1**.
 """)
 
 # Upload PDFs
@@ -36,19 +36,20 @@ llm = ChatGoogleGenerativeAI(
     temperature=0.2
 )
 
-# Prompt
+# Prompt Template
 prompt = ChatPromptTemplate.from_template("""
-Answer the question using ONLY the given context.
+Answer the question using ONLY the provided context.
 
 <context>
 {context}
+</context>
 
 Question: {question}
 """)
 
 parser = StrOutputParser()
 
-# ---- VECTOR EMBEDDING FUNCTION ----
+# ---------------- VECTOR EMBEDDING FUNCTION --------------------
 def vector_embedding():
     try:
         asyncio.get_running_loop()
@@ -57,12 +58,13 @@ def vector_embedding():
 
     if uploaded_files and "vectors" not in st.session_state:
 
+        # Use HuggingFace embeddings
         st.session_state.embeddings = HuggingFaceEmbeddings(
             model_name="sentence-transformers/all-MiniLM-L6-v2"
         )
         st.session_state.docs = []
 
-        # Load all PDFs
+        # Load PDFs into docs
         for uploaded_file in uploaded_files:
             with open(uploaded_file.name, "wb") as f:
                 f.write(uploaded_file.getbuffer())
@@ -71,37 +73,40 @@ def vector_embedding():
             st.session_state.docs.extend(loader.load())
             os.remove(uploaded_file.name)
 
+        # Split docs
         splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=200)
         final_docs = splitter.split_documents(st.session_state.docs)
 
         st.session_state.final_documents = final_docs
         st.session_state.vectors = FAISS.from_documents(final_docs, st.session_state.embeddings)
 
-# Input box
+# ----------------------------------------------------------------
+
+# User Query
 query = st.text_input("💬 Ask your question:")
 
-# Create vectors
+# Create Vectors Button
 if st.button("🔍 Documents Embedding"):
     if uploaded_files:
         vector_embedding()
         st.success("✅ Vector Store is ready!")
     else:
-        st.warning("⚠️ Upload PDFs first.")
+        st.warning("⚠️ Please upload PDFs first.")
 
-# ---- RETRIEVAL + ANSWERING ----
+# ------------------ Q&A SECTION ------------------------------
 if query:
     if "vectors" not in st.session_state:
-        st.warning("⚠️ Please run 'Documents Embedding' first.")
+        st.warning("⚠️ Please click 'Documents Embedding' first.")
     else:
         retriever = st.session_state.vectors.as_retriever()
 
-        # Retrieve relevant docs
-        retrieved_docs = retriever.get_relevant_documents(query)
+        # NEW LangChain v1 API
+        retrieved_docs = retriever.invoke(query)
 
-        # Build context text
+        # Join retrieved chunks
         context_text = "\n\n".join([doc.page_content for doc in retrieved_docs])
 
-        # Final chain: prompt → LLM → parser
+        # Prompt → LLM → Parser
         chain = prompt | llm | parser
 
         start = time.process_time()
