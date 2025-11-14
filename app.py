@@ -1,12 +1,12 @@
 import os
 import streamlit as st
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI  # Changed
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.chains.combine_documents.stuff import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.chains import create_retrieval_chain
 from langchain_community.vectorstores import FAISS
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings  # Changed
 from langchain_community.document_loaders import PyPDFLoader
 from dotenv import load_dotenv
 import asyncio
@@ -14,16 +14,16 @@ import time
 
 # Load environment variables
 load_dotenv()
-groq_api_key = os.getenv("GROQ_API_KEY")
-os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
+# groq_api_key = os.getenv("GROQ_API_KEY")
+google_api_key = os.getenv("GOOGLE_API_KEY")
 
 # App title
-st.title("GEMMA Model Document Q&A")
+st.title("GEMINI Model Document Q&A")
 
 st.markdown("""
-Welcome to **GEMMA-powered Document Q&A App**!  
+Welcome to **GEMINI-powered Document Q&A App**!  
 📄 Upload any PDF documents, and 🤖 ask questions about their content.  
-This app uses **Gemma 2-9B Instruct Model via Groq API** to give you fast and accurate answers.
+This app uses **Gemini 2-9B Instruct Model via Groq API** to give you fast and accurate answers.
 
 **How it works:**
 1. Upload one or more PDF files.
@@ -39,8 +39,12 @@ This app uses **Gemma 2-9B Instruct Model via Groq API** to give you fast and ac
 # Upload PDF files
 uploaded_files = st.file_uploader("Upload your PDF files", type=["pdf"], accept_multiple_files=True)
 
-# Initialize GEMMA LLM
-llm = ChatGroq(groq_api_key=groq_api_key, model_name="gemma2-9b-it")
+# Initialize GEMINI LLM
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-pro",
+    google_api_key=google_api_key,
+    temperature=0.2
+)
 
 # Prompt Template
 prompt = ChatPromptTemplate.from_template(
@@ -60,7 +64,10 @@ def vector_embedding():
         asyncio.set_event_loop(asyncio.new_event_loop())
 
     if uploaded_files and "vectors" not in st.session_state:
-        st.session_state.embeddings = GoogleGenerativeAIEmbeddings(model="embedding-001")
+        # Use HuggingFace embeddings instead
+        st.session_state.embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
         st.session_state.docs = []
 
         for uploaded_file in uploaded_files:
